@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Real Detector</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Real or Fake?</h1>
+            <p>Upload an image to our AI detector to find out if it is genuine or AI-generated.</p>
+        </header>
+
+        <main>
+            <div class="upload-area" id="drop-zone">
+                <input type="file" id="file-input" accept="image/*" hidden>
+                <div class="upload-content">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    <p>Drag & Drop an image here or</p>
+                    <button id="browse-btn" class="btn">Browse Files</button>
+                </div>
+                <img id="image-preview" src="#" alt="Image Preview" style="display: none;">
+            </div>
+
+            <button id="predict-btn" class="btn primary-btn" disabled>Analyze Image</button>
+
+            <div id="result-container" class="result-container" style="display: none;">
+                <div class="loader" id="loader"></div>
+                <div id="result-content" style="display: none;">
+                    <h2 class="result-title" id="prediction-text">Result Goes Here</h2>
+                    <div class="confidence-bar-container">
+                        <div class="confidence-bar" id="confidence-bar"></div>
+                    </div>
+                    <p class="confidence-text">Confidence: <span id="confidence-value">0%</span></p>
+                    <p class="warning-text" id="warning-text"></p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const browseBtn = document.getElementById('browse-btn');
+        const imagePreview = document.getElementById('image-preview');
+        const uploadContent = document.querySelector('.upload-content');
+        const predictBtn = document.getElementById('predict-btn');
+        
+        const resultContainer = document.getElementById('result-container');
+        const loader = document.getElementById('loader');
+        const resultContent = document.getElementById('result-content');
+        const predictionText = document.getElementById('prediction-text');
+        const confidenceBar = document.getElementById('confidence-bar');
+        const confidenceValue = document.getElementById('confidence-value');
+        const warningText = document.getElementById('warning-text');
+
+        let selectedFile = null;
+
+        // Ensure drop zone visually responds to drag events
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight() {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        browseBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                selectedFile = files[0];
+                
+                if (!selectedFile.type.startsWith('image/')) {
+                    alert('Please upload an image file.');
+                    return;
+                }
+
+                predictBtn.disabled = false;
+                resultContainer.style.display = 'none';
+
+                const reader = new FileReader();
+                reader.readAsDataURL(selectedFile);
+                reader.onloadend = function() {
+                    imagePreview.src = reader.result;
+                    imagePreview.style.display = 'block';
+                    uploadContent.style.display = 'none';
+                    dropZone.style.borderStyle = 'solid';
+                    dropZone.style.borderColor = 'var(--primary-color)';
+                }
+            }
+        }
+
+        predictBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            // UI updates for loading state
+            predictBtn.disabled = true;
+            resultContainer.style.display = 'flex';
+            loader.style.display = 'block';
+            resultContent.style.display = 'none';
+            resultContainer.classList.remove('fake', 'real');
+
+            const formData = new FormData();
+            formData.append('image', selectedFile);
+
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Something went wrong');
+                }
+
+                // Show results
+                loader.style.display = 'none';
+                resultContent.style.display = 'block';
+
+                const isFake = data.prediction.toLowerCase() === 'fake';
+                predictionText.textContent = data.prediction.toUpperCase();
+                
+                resultContainer.classList.add(isFake ? 'fake' : 'real');
+                
+                const confidencePercent = (data.confidence * 100).toFixed(1);
+                confidenceValue.textContent = `${confidencePercent}%`;
+                
+                // Animate bar
+                setTimeout(() => {
+                    confidenceBar.style.width = `${confidencePercent}%`;
+                    confidenceBar.style.backgroundColor = isFake ? 'var(--fake-color)' : 'var(--real-color)';
+                }, 100);
+
+                if (data.warning) {
+                    warningText.textContent = data.warning;
+                    warningText.style.display = 'block';
+                } else {
+                    warningText.style.display = 'none';
+                }
+
+            } catch (error) {
+                alert(error.message);
+                resultContainer.style.display = 'none';
+            } finally {
+                predictBtn.disabled = false;
+            }
+        });
+
+        // Click on preview to change image
+        imagePreview.addEventListener('click', () => {
+            fileInput.click();
+        });
+    </script>
+</body>
+</html>
